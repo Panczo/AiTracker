@@ -4,21 +4,30 @@ System automatycznej detekcji i klasyfikacji pojazdów z nagrań wideo wykorzyst
 
 ## 📋 Funkcjonalności
 
-- ✅ Detekcja i śledzenie pojazdów w czasie rzeczywistym
+### Podstawowe
+- ✅ Detekcja i śledzenie pojazdów z YOLOv11 + BoT-SORT
 - ✅ Klasyfikacja 8+1 kategorii pojazdów:
-  - Motocykle
-  - Samochody osobowe
-  - Samochody dostawcze
-  - Samochody ciężarowe
-  - Autobusy
-  - Rowery
-  - Ciągniki
-  - Przyczepy
-  - Inne
-- ✅ Export wideo z zaznaczonymi pojazdami (bounding boxes)
-- ✅ Raport CSV z szczegółowymi danymi (ID, typ, pewność, czasy)
+  - Motocykle, Samochody osobowe, Dostawcze, Ciężarowe
+  - Autobusy, Rowery, Ciągniki, Przyczepy, Inne
+- ✅ Line crossing detection - zliczanie tylko w wybranym kierunku
 - ✅ Real-time progress tracking przez WebSocket
-- ✅ Aplikacja webowa z intuicyjnym interfejsem
+
+### Batch Processing
+- ✅ Upload wielu plików naraz (do 24h materiału)
+- ✅ Automatyczna kontynuacja czasu między plikami
+- ✅ Przetwarzanie sekwencyjne z cumulative tracking
+- ✅ Typowo: 288 plików × 5 min = 24h nagrań
+
+### Raporty i Wyniki
+- ✅ **Raport 5-minutowy**: CSV z podziałem na godziny i 5-min przedziały
+- ✅ Export wideo z zaznaczonymi pojazdami (bounding boxes + linia)
+- ✅ Statystyki per typ pojazdu
+- ✅ Format: `Godzina | Przedział | Czas_Od | Czas_Do | [Typy] | SUMA`
+
+### Dodatkowe
+- ✅ Opcjonalna anonimizacja (blur tablic rejestracyjnych)
+- ✅ Aplikacja webowa z 4-stopniowym workflow
+- ✅ Interaktywne rysowanie linii zliczającej na canvas
 
 ## 🏗️ Architektura
 
@@ -114,20 +123,46 @@ Frontend będzie dostępny pod adresem: `http://localhost:3000`
 
 ## 💻 Użytkowanie
 
-1. **Upload nagrania**: Przeciągnij plik wideo (MP4, AVI, MOV, MKV) lub kliknij, aby wybrać plik
-2. **Przetwarzanie**: System automatycznie rozpocznie detekcję i śledzenie pojazdów
-3. **Monitorowanie**: Obserwuj postęp w czasie rzeczywistym przez WebSocket
-4. **Wyniki**: Po zakończeniu pobierz:
-   - Wideo z zaznaczonymi pojazdami
-   - Raport CSV z danymi
+### Workflow (4 kroki)
 
-### Format raportu CSV
+1. **📦 Upload wielu plików**
+   - Przeciągnij wiele plików MP4 (do 24h łącznie)
+   - System waliduje rozmiar i czas trwania
+   - Typowo: ~288 plików × 5 min = 24h
+
+2. **📏 Narysuj linię zliczającą**
+   - Na pierwszej klatce wideo narysuj linię
+   - Strzałka wskazuje kierunek zliczania
+   - Opcja: włącz anonimizację tablic
+   - Można pominąć (zlicza wszystko)
+
+3. **⚙️ Przetwarzanie**
+   - Real-time progress przez WebSocket
+   - Status per plik + ogólny postęp
+   - Automatyczne przejście między plikami
+
+4. **📊 Wyniki**
+   - Pobierz raport CSV (5-min przedziały)
+   - Statystyki per typ pojazdu
+   - Wykresy i podsumowania
+
+### Format raportu CSV (5-minutowe przedziały)
 
 ```csv
-vehicle_id,type,confidence,first_seen,last_seen,duration_seconds
-1,samochod_osobowy,0.95,0:00:05,0:00:12,7.00
-2,motocykl,0.89,0:00:08,0:00:15,7.00
+Godzina,Przedzial,Czas_Od,Czas_Do,Motocykl,Samochód Osobowy,Samochód Dostawczy,Samochód Ciężarowy,Autobus,Rower,Ciągnik,Przyczepa,Inne,SUMA
+0,1,0:00:00,0:05:00,5,120,15,8,2,10,1,0,3,164
+0,2,0:05:00,0:10:00,3,98,12,5,1,8,0,1,2,130
+0,3,0:10:00,0:15:00,7,115,18,9,3,12,2,1,4,171
+...
+23,12,23:55:00,24:00:00,4,89,10,4,0,6,1,0,1,115
 ```
+
+**Kolumny:**
+- `Godzina`: Numer godziny (0-23)
+- `Przedzial`: Numer 5-min przedziału w godzinie (1-12)
+- `Czas_Od` / `Czas_Do`: Zakres czasowy
+- `[Typy pojazdów]`: Liczba pojazdów każdego typu
+- `SUMA`: Łączna liczba pojazdów w przedziale
 
 ## 🔧 Konfiguracja
 
@@ -154,24 +189,45 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 
 ### REST API
 
-- `POST /api/upload` - Upload pliku wideo
+**Upload & Configuration:**
+- `POST /api/upload` - Upload pojedynczego pliku (legacy)
+- `POST /api/upload-batch` - Upload wielu plików (batch)
+- `GET /api/preview/{job_id}` - Pobierz pierwszą klatkę (base64 JPEG)
+- `POST /api/set-line/{job_id}` - Ustaw linię zliczającą
+- `POST /api/set-options/{job_id}` - Ustaw opcje (anonimizacja)
+
+**Processing & Status:**
 - `POST /api/process/{job_id}` - Rozpocznij przetwarzanie
 - `GET /api/status/{job_id}` - Pobierz status zadania
-- `GET /api/download/{job_id}/video` - Pobierz przetworzone wideo
-- `GET /api/download/{job_id}/csv` - Pobierz raport CSV
-- `DELETE /api/job/{job_id}` - Usuń zadanie
+
+**Download:**
+- `GET /api/download/{job_id}/csv` - Pobierz raport CSV (5-min)
+- `DELETE /api/job/{job_id}` - Usuń zadanie i pliki
 
 ### WebSocket
 
 - `WS /ws/{job_id}` - Real-time status updates
+  - Progress (%)
+  - Current step
+  - Files processed (batch)
+  - Frame counts
 
-## 🎯 Planowane ulepszenia
+## ✨ Zrealizowane funkcjonalności
 
-- [ ] Fine-tuning modelu dla lepszej klasyfikacji ciężarówek/dostawczych
-- [ ] Wykrywanie kierunku ruchu pojazdów
-- [ ] Liczenie pojazdów przecinających linię
-- [ ] Obsługa wielu nagrań jednocześnie (kolejka)
-- [ ] Eksport do innych formatów (JSON, XML)
+- [x] Fine-tuning ready (gotowy do treningu na własnym datasecie)
+- [x] Wykrywanie kierunku ruchu pojazdów (line crossing)
+- [x] Liczenie pojazdów przecinających linię
+- [x] Obsługa wielu nagrań jednocześnie (batch do 24h)
+- [x] Export CSV z 5-minutowymi przedziałami
+- [x] Anonimizacja tablic rejestracyjnych
+- [x] WebSocket real-time tracking
+
+## 🎯 Potencjalne rozszerzenia
+
+- [ ] Excel export (aktualnie CSV)
+- [ ] Wykresy wizualizacyjne w interfejsie
+- [ ] Heatmapy ruchu pojazdów
+- [ ] Detekcja prędkości
 - [ ] Autentykacja użytkowników
 - [ ] Historia przetwarzanych nagrań
 - [ ] Dashboard z statystykami
