@@ -17,12 +17,21 @@ from app.config import (
 class VehicleTracker:
     """Handles vehicle detection and tracking using YOLO."""
 
-    def __init__(self):
-        """Initialize YOLO model and tracking data structures."""
+    def __init__(self, counting_line=None):
+        """
+        Initialize YOLO model and tracking data structures.
+
+        Args:
+            counting_line: Tuple of ((x1, y1), (x2, y2)) defining the counting line,
+                          or None for no line crossing detection
+        """
         self.model_path = MODELS_DIR / YOLO_MODEL
         self.model = None
         self.tracked_vehicles = {}  # track_id -> vehicle info
         self.vehicle_counts = defaultdict(int)
+        self.counting_line = counting_line
+        self.crossed_vehicles = set()  # Track IDs that crossed the line
+        self.vehicle_positions = {}  # track_id -> previous position for line crossing detection
 
     def load_model(self):
         """Load YOLO model."""
@@ -57,6 +66,59 @@ class VehicleTracker:
         #     vehicle_type = 'samochod_ciezarowy'
 
         return vehicle_type
+
+    def check_line_crossing(self, track_id: int, current_center: Tuple[float, float]) -> bool:
+        """
+        Check if a vehicle crossed the counting line.
+
+        Args:
+            track_id: Vehicle track ID
+            current_center: Current center position (x, y) of the vehicle
+
+        Returns:
+            True if vehicle crossed the line in this frame, False otherwise
+        """
+        if self.counting_line is None:
+            # No line defined, count on first detection
+            if track_id not in self.crossed_vehicles:
+                self.crossed_vehicles.add(track_id)
+                return True
+            return False
+
+        if track_id in self.crossed_vehicles:
+            # Already counted
+            return False
+
+        if track_id not in self.vehicle_positions:
+            # First detection of this vehicle
+            self.vehicle_positions[track_id] = current_center
+            return False
+
+        prev_center = self.vehicle_positions[track_id]
+        self.vehicle_positions[track_id] = current_center
+
+        # Check if the line segment from prev_center to current_center
+        # intersects with the counting line
+        (x1, y1), (x2, y2) = self.counting_line
+        px1, py1 = prev_center
+        px2, py2 = current_center
+
+        # Line intersection using cross product
+        def ccw(A, B, C):
+            return (C[1] - A[1]) * (B[0] - A[0]) > (B[1] - A[1]) * (C[0] - A[0])
+
+        line_a = (x1, y1)
+        line_b = (x2, y2)
+        movement_a = prev_center
+        movement_b = current_center
+
+        if ccw(line_a, movement_a, movement_b) != ccw(line_b, movement_a, movement_b) and \
+           ccw(line_a, line_b, movement_a) != ccw(line_a, line_b, movement_b):
+            # Lines intersect!
+            self.crossed_vehicles.add(track_id)
+            return True
+
+        return False
 
     def process_frame(
         self, frame: np.ndarray, frame_number: int
@@ -101,8 +163,16 @@ class VehicleTracker:
                     x1, y1, x2, y2 = box
                     bbox_area = (x2 - x1) * (y2 - y1)
 
+                    # Calculate center point for line crossing detection
+                    center_x = (x1 + x2) / 2
+                    center_y = (y1 + y2) / 2
+                    current_center = (center_x, center_y)
+
                     # Classify vehicle
                     vehicle_type = self.classify_vehicle(cls, bbox_area)
+
+                    # Check line crossing
+                    crossed_line = self.check_line_crossing(track_id, current_center)
 
                     # Update or create tracked vehicle
                     if track_id not in self.tracked_vehicles:
@@ -113,14 +183,21 @@ class VehicleTracker:
                             'last_seen': frame_number,
                             'max_confidence': conf,
                             'coco_class': cls,
+                            'counted': crossed_line,
                         }
-                        self.vehicle_counts[vehicle_type] += 1
+                        # Only count if crossed the line (or no line defined)
+                        if crossed_line:
+                            self.vehicle_counts[vehicle_type] += 1
                     else:
                         # Update existing track
                         self.tracked_vehicles[track_id]['last_seen'] = frame_number
                         self.tracked_vehicles[track_id]['max_confidence'] = max(
                             self.tracked_vehicles[track_id]['max_confidence'], conf
                         )
+                        # Check if just crossed the line
+                        if crossed_line and not self.tracked_vehicles[track_id]['counted']:
+                            self.vehicle_counts[vehicle_type] += 1
+                            self.tracked_vehicles[track_id]['counted'] = True
 
                     # Draw bounding box and label
                     color = self._get_color_for_type(vehicle_type)
@@ -164,6 +241,21 @@ class VehicleTracker:
                         'confidence': float(conf),
                         'bbox': [float(x1), float(y1), float(x2), float(y2)],
                     })
+
+        # Draw counting line if defined
+        if self.counting_line is not None:
+            (x1, y1), (x2, y2) = self.counting_line
+            cv2.line(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 3)
+            # Draw arrow to indicate direction
+            cv2.putText(
+                annotated_frame,
+                f"Zliczono: {len(self.crossed_vehicles)}",
+                (int(x1), int(y1) - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 0, 255),
+                2,
+            )
 
         return annotated_frame, detections
 

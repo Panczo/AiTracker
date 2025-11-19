@@ -18,9 +18,14 @@ MODELS_DIR.mkdir(parents=True, exist_ok=True)
 # File size limits
 MAX_FILE_SIZE_MB = 250
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+MAX_TOTAL_DURATION_HOURS = 24  # Maximum total video duration for batch
 
 # Allowed video formats
 ALLOWED_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
+
+# Time interval settings
+INTERVAL_MINUTES = 5  # Report intervals in minutes
+SECONDS_PER_INTERVAL = INTERVAL_MINUTES * 60
 
 # Vehicle classification (8+1 categories)
 VEHICLE_CLASSES = {
@@ -56,6 +61,14 @@ TRACK_PERSISTENCE = 30  # frames to keep track alive without detection
 FRAME_SKIP = 1  # Process every Nth frame (1 = all frames)
 OUTPUT_VIDEO_CODEC = "mp4v"
 OUTPUT_VIDEO_FPS = 30
+
+# Anonymization settings
+BLUR_KERNEL_SIZE = 51  # Size of blur kernel (must be odd)
+FACE_CONFIDENCE = 0.5  # Minimum confidence for face detection
+PLATE_CONFIDENCE = 0.3  # Minimum confidence for license plate detection
+
+# Line crossing settings
+LINE_CROSSING_TOLERANCE = 10  # Pixels tolerance for line crossing detection
 
 # Database settings
 DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_PATH}"
